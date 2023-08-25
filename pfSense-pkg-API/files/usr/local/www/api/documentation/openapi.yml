@@ -12507,10 +12507,15 @@ paths:
                     alt name type as the key and the alt name value as the value.
                     Supported alt name types are `dns` for FQDNs, `ip` for IP addresses,
                     `uri` for URLs, and `email` for email addresses. This parameter
-                    is only available when `method` is set to `internal`.
+                    is only available when `method` is set to `internal` or `external`.
                   items:
                     type: object
                   type: array
+                  example:
+                  - dns: ex.com
+                  - ip: 1.1.1.1
+                  - uri: http://ex.com/ex
+                  - email: ex@ex.com
                 caref:
                   description: Unique reference ID of the existing certificate signing
                     authority to use for the certificate. This parameter is required
@@ -12527,7 +12532,7 @@ paths:
                   type: string
                 digest_alg:
                   description: 'Digest algorithm to use. This parameter is required
-                    when `method` is set to `internal`. _Note: options are subject
+                    when `method` is set to `internal` or `external`. _Note: options are subject
                     to change, when in doubt, check the pfSense webConfigurator options
                     for this field._'
                   enum:
@@ -12539,43 +12544,46 @@ paths:
                   type: string
                 dn_city:
                   description: City or locale for this certificate. This parameter
-                    is only available when `method` is set to `internal`.
+                    is only available when `method` is set to `internal` or `external`.
                   type: string
                 dn_commonname:
                   description: Common name of this certificate. In mose cases, this
                     will be a hostname. This parameter is required when `method` is
-                    set to `internal`.
+                    set to `internal` or `external`.
                   type: string
                 dn_country:
                   description: Country code for this certificate. This must be a known
                     2-digit country code. This parameter is only available when `method`
-                    is set to `internal`.
+                    is set to `internal` or `external`.
                   type: string
                 dn_organization:
                   description: The managing organization for this certificate. This
-                    parameter is only available when `method` is set to `internal`.
+                    parameter is only available when `method` is set to `internal` or 
+                    `external`.
                   type: string
                 dn_organizationalunit:
                   description: The managing organizational unit or team for this certificate.
-                    This parameter is only available when  `method` is set to `internal`.
+                    This parameter is only available when  `method` is set to `internal`
+                    or `external`.
                   type: string
                 dn_state:
                   description: State or province for this certificate. This parameter
-                    is only available when `method` is set to `internal`.
+                    is only available when `method` is set to `internal` or `external`.
                   type: string
                 ecname:
                   description: 'Elliptic curve name to use when generating the private
                     key. It is recommended to view options and compatibility within
                     the pfSense webConfigurator or manually through OpenSSL as certain
                     curves are not compatible in some circumstances. This parameter
-                    is required when `method` is set to `internal` AND `keytype` is
-                    set to `ECDSA`. _Note: options are subject to change, when in
-                    doubt, check the pfSense webConfigurator options for this parameter._'
+                    is required when `method` is set to `internal` or `external` AND 
+                    `keytype` is set to `ECDSA`. _Note: options are subject to change, 
+                    when in doubt, check the pfSense webConfigurator options for this 
+                    parameter._'
                   type: string
                 keylen:
                   description: Specify the private key length to generate. This parameter
-                    is required when `method` is set to `internal` AND `keytype` is
-                    set to `RSA`.
+                    is required when `method` is set to `internal` or `external` AND 
+                    `keytype` is set to `RSA`.
                   enum:
                     - 1024
                     - 2048
@@ -12589,7 +12597,8 @@ paths:
                   type: integer
                 keytype:
                   description: Private key type to generate. Options are `RSA` or
-                    `ECDSA`. This parameter is required when `method` is set to `internal`.
+                    `ECDSA`. This parameter is required when `method` is set to 
+                    `internal` or `external`.
                   enum:
                     - RSA
                     - ECDSA
@@ -12604,13 +12613,15 @@ paths:
                     this parameter._'
                   type: integer
                 method:
-                  description: 'Method used to add the certificate. _Note: previous
-                    releases referred to the `existing` method as `import`.  You may
-                    use `existing` or `import` interchangeably._'
+                  description: 'Method used to add the certificate. The method 
+                    `external` is used to create local key and a certificate signing
+                    request _Note: previous releases referred to the `existing` method
+                    as `import`. You may use `existing` or `import` interchangeably._'
                   enum:
                     - import
                     - existing
                     - internal
+                    - external
                   type: string
                 prv:
                   description: 'Corresponding Base64 encoded certificate key. This
@@ -12620,7 +12631,7 @@ paths:
                   type: string
                 type:
                   description: Type of certificate to generate. This parameter is
-                    required when `method` is set to `internal`.
+                    required when `method` is set to `internal` or `external`.
                   enum:
                     - server
                     - user
@@ -12651,9 +12662,10 @@ paths:
                   description: 'ID of the certificate to be updated.'
                   type: string
                 crt:
-                  description: 'Base64 encoded PEM certificate to import. _Note: previous
-                    releases referred to the `crt` parameter as `cert`. Both `crt`
-                    and `cert` can be used interchangeably._'
+                  description: 'Base64 encoded PEM certificate to import. To process
+                    a csr the certificate needs to be upload in this field. _Note: 
+                    previous releases referred to the `crt` parameter as `cert`. Both 
+                    `crt` and `cert` can be used interchangeably._'
                   type: string
                 prv:
                   description: 'Corresponding Base64 encoded certificate key. _Note:
@@ -12670,8 +12682,6 @@ paths:
                   type: boolean
               required:
                 - refid
-                - crt
-                - prv
               type: object
       responses:
         "200":

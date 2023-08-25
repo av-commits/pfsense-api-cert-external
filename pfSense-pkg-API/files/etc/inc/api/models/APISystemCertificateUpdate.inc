@@ -26,13 +26,51 @@ class APISystemCertificateUpdate extends APIModel {
     }
 
     public function action() {
+        $removeKey = true;
+
+        # Update certificate
         $this->set_config("cert/{$this->id}", $this->validated_data);
+
+        # If user requests this cert to be active, configure it as the wc cert
+        $restart_webcfg = false;
+        if ($this->initial_data["active"] === true and $this->validated_data["type"] === "server") {
+            $this->set_config("system/webgui/ssl-certref", $this->validated_data["refid"]);
+            $restart_webcfg = true;
+        }
+
+        # Write changes to configuration
         $this->write_config();
-        return APIResponse\get(0, $this->get_config("cert/{$this->id}"));
+
+        # Restart our webgui if certificate has been activated
+        if ($restart_webcfg === true) {
+            APITools\restart_webconfigurator();
+        }
+
+        $res = $this->get_config("cert/{$this->id}");
+        if ($removeKey && isset($res["prv"]))
+            unset($res["prv"]);
+
+        return APIResponse\get(0, $res);
+    }
+
+    public function validate_payload() {
+        # do backwards compatible once
+        # Convert 'cert' to 'crt' to remain backwards compatible
+        if (isset($this->initial_data["cert"])) {
+            $this->initial_data["crt"] = $this->initial_data["cert"];
+        }
+        # Convert 'key' to 'prv' to remain backwards compatible
+        if (isset($this->initial_data["key"])) {
+            $this->initial_data["prv"] = $this->initial_data["key"];
+        }
+
+        $this->__validate_refid();
+        $this->__validate_crt_and_prv();
+        $this->__validate_descr();
     }
 
     private function __validate_refid() {
-        # Validate optional 'refid' field containing the refid of an existing certificate. If refid is not passed, find the cert through 'descr' field
+        # Validate required 'refid' field containing the refid of an existing certificate. If refid is not passed, find the cert through 'descr' field
         if (isset($this->initial_data["refid"])) {
             # Loop through each cert and check for a match
             foreach ($this->get_config("cert", []) as $id=>$cert) {
@@ -50,54 +88,42 @@ class APISystemCertificateUpdate extends APIModel {
         }
     }
 
-    private function __validate_crt() {
-        # Check for our required 'crt' field
-        if (isset($this->initial_data["crt"]) or isset($this->initial_data["cert"])) {
-            # Convert 'cert' to 'crt' to remain backwards compatible
-            if (isset($this->initial_data["cert"])) {
-                $this->initial_data["crt"] = $this->initial_data["cert"];
+    private function __validate_crt_and_prv() {
+        # combine the validation of optional crt and prv because many validation need both values
+        if (isset($this->initial_data["crt"]) && isset($this->validated_data["csr"])) {
+            # update csr use case if request contains crt and config csr
+            if (isset($this->initial_data["prv"])) {
+                $this->errors[] = APIResponse\get(1093);
+            }
+            $crt = base64_decode($this->initial_data["crt"]);
+            $prv = base64_decode($this->validated_data["prv"]);
+
+            if (cert_get_publickey($crt, false) != cert_get_publickey($prv, false, 'prv')) {
+                $this->errors[] = APIResponse\get(1049);
             }
 
-            # Decode certificate from base64 format
+            csr_complete($this->validated_data, $crt);
+        }
+        elseif (isset($this->initial_data["crt"]) || isset($this->initial_data["prv"])) {
             $crt = base64_decode($this->initial_data["crt"]);
+            $prv = base64_decode($this->initial_data["prv"]);
+            if (empty($crt)) $crt = base64_decode($this->validated_data["crt"]);
+            if (empty($prv)) $prv = base64_decode($this->validated_data["prv"]);
 
-            # Check if our certificate is valid
             if (!strstr($crt, "BEGIN CERTIFICATE") || !strstr($crt, "END CERTIFICATE")) {
                 $this->errors[] = APIResponse\get(1003);
             }
-            else {
-                $this->validated_data["crt"] = base64_encode($crt);
-            }
-        } else {
-            $this->errors[] = APIResponse\get(1003);
-        }
-    }
-
-    private function __validate_prv() {
-        # Check for our required 'prv' field
-        if (isset($this->initial_data["prv"]) or isset($this->initial_data["key"])) {
-            # Convert 'key' to 'prv' to remain backwards compatible
-            if (isset($this->initial_data["key"])) {
-                $this->initial_data["prv"] = $this->initial_data["key"];
-            }
-
-            # Decode certificate from base64 format
-            $crt = base64_decode($this->initial_data["crt"]);
-            $key = base64_decode($this->initial_data["prv"]);
 
             # Check if this private key is encrypted
-            if (strstr($key, "ENCRYPTED")) {
+            if (strstr($prv, "ENCRYPTED")) {
                 $this->errors[] = APIResponse\get(1036);
             }
-            # Check if our certificate and key matches
-            elseif (cert_get_publickey($crt, false) != cert_get_publickey($key, false, 'prv')) {
+
+            if (cert_get_publickey($crt, false) != cert_get_publickey($prv, false, 'prv')) {
                 $this->errors[] = APIResponse\get(1049);
             }
-            else {
-                $this->validated_data["prv"] = base64_encode($key);
-            }
-        } else {
-            $this->errors[] = APIResponse\get(1004);
+
+            cert_import($this->validated_data, $crt, $prv);
         }
     }
 
@@ -112,12 +138,4 @@ class APISystemCertificateUpdate extends APIModel {
             }
         }
     }
-
-    public function validate_payload() {
-        $this->__validate_refid();
-        $this->__validate_crt();
-        $this->__validate_prv();
-        $this->__validate_descr();
-    }
-
 }

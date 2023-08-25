@@ -609,6 +609,36 @@ function get($id, $data=[], $all=false) {
             "return" => $id,
             "message" => "System table with this name does not exist"
         ],
+        1084 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "Certificate export format is not supported"
+        ],
+        1085 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "Certificate export encryption is not supported"
+        ],
+        1093 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "CSR update does not allow to include private key"
+        ],
+        1094 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "An error occurred attempting to generate csr. Please check your DN values."
+        ],
+        1095 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "Creation of active csr is not allowed, certificate is missing"
+        ],
 
         // 2000-2999 reserved for /api/v1/services API calls
         2000 => [

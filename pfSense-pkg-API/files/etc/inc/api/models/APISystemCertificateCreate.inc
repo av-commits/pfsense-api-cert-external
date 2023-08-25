@@ -33,22 +33,29 @@ class APISystemCertificateCreate extends APIModel {
     }
 
     public function action() {
+        $removeKey = true;
+
         # Add the new certificate
         $this->id = $this->get_next_id("cert");
         $this->set_config("cert/{$this->id}",  $this->validated_data);
 
         # If user requests this cert to be active, configure it as the wc cert
+        $restart_webcfg = false;
         if ($this->initial_data["active"] === true and $this->validated_data["type"] === "server") {
             $this->set_config("system/webgui/ssl-certref", $this->validated_data["refid"]);
+            $restart_webcfg = true;
         }
 
         # Write changes to configuration
         $this->write_config();
 
-        # Restart our webgui if user set this cert as active
-        if ($this->initial_data["active"] === true) {
+        # Restart our webgui if certificate has been activated
+        if ($restart_webcfg === true) {
             APITools\restart_webconfigurator();
         }
+
+        if ($removeKey && isset($this->validated_data["prv"]))
+            unset($this->validated_data["prv"]);
 
         return APIResponse\get(0, $this->validated_data);
     }
@@ -84,13 +91,30 @@ class APISystemCertificateCreate extends APIModel {
             $this->__validate_altnames();
         }
 
+        # Validate 'external' method fields (create a csr)
+        if ($this->cert_method === "external") {
+            $this->__validate_keytype();
+            $this->__validate_keylen();
+            $this->__validate_ecname();
+            $this->__validate_digest_alg();
+            $this->__validate_dn_commonname();
+            $this->__validate_dn_country();
+            $this->__validate_dn_state();
+            $this->__validate_dn_city();
+            $this->__validate_dn_organization();
+            $this->__validate_dn_organizationalunit();
+            $this->__validate_type();
+            $this->__validate_altnames();
+            $this->__validate_dont_allow_active();
+        }
+
         # Create the certificate
         $this->create_certificate();
     }
 
     private function __validate_method() {
         # Local variables
-        $methods = ["import", "existing", "internal"];
+        $methods = ["import", "existing", "internal", "external"];
 
         if (isset($this->initial_data['method'])) {
             # Ensure the method is a supported one
@@ -397,6 +421,12 @@ class APISystemCertificateCreate extends APIModel {
         }
     }
 
+    private function __validate_dont_allow_active() {
+        if ($this->initial_data["active"] === true) {
+            $this->errors[] = APIResponse\get(1095);
+        }
+    }
+
     public function get_all_ca() {
         # Local variables
         $ca_enties = [];
@@ -430,10 +460,30 @@ class APISystemCertificateCreate extends APIModel {
                 $this->cert_attr['keytype'],
                 $this->cert_attr['ecname']
             );
+            # type is read from certificate and not defined explicitly
+            unset($this->validated_data["type"]);
 
             # Check if OpenSSL failed to generate the certificate
             if (!$openssl_create) {
                 $this->errors[] = APIResponse\get(1050);
+            }
+        }
+
+        # Only generate a new certificate if no errors were found and the method was external
+        if (empty($this->errors) and $this->cert_method === "external") {
+            $openssl_csr = csr_generate(
+                $this->validated_data,
+                $this->cert_attr['keylen'],
+                $this->dn,
+                $this->validated_data["type"],
+                $this->cert_attr['digest_alg'],
+                $this->cert_attr['keytype'],
+                $this->cert_attr['ecname']
+            );
+
+            # Check if OpenSSL failed to generate the csr
+            if (!$openssl_csr) {
+                $this->errors[] = APIResponse\get(1094);
             }
         }
     }
