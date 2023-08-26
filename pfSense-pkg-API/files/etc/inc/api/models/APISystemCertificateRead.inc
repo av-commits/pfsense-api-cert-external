@@ -25,8 +25,6 @@ class APISystemCertificateRead extends APIModel {
     }
 
     public function action() {
-        $removeKey = true;
-
         $data = $this->get_config("cert", []);
         foreach ($data as &$cert) {
             $cert["keyavailable"] = !empty($cert["prv"]);
@@ -55,7 +53,19 @@ class APISystemCertificateRead extends APIModel {
                 if (is_ipsec_cert($cert['refid'])) $cert["inuse"][] = "IPsec Tunnel";
                 if (is_captiveportal_cert($cert['refid'])) $cert["inuse"][] = "Captive Portal";
                 if (is_unbound_cert($cert['refid'])) $cert["inuse"][] = "DNS Resolver";
-                //TODO inuse by package cert_usedby_description
+
+                # evaluate in use of certificates in packages
+                $pluginparams = array();
+                $pluginparams['type'] = 'certificates';
+                $pluginparams['event'] = 'used_certificates';
+                $certificates_used_by_packages = pkg_call_plugins('plugin_certificates', $pluginparams);
+                if (is_array($certificates_used_by_packages)) {
+                    foreach ($certificates_used_by_packages as $name => $package) {
+                        if (isset($package['certificatelist'][$cert['refid']])) {
+                            $cert["inuse"][] = "pkg_".$package['pkgname'];
+                        }
+                    }
+                }
 
                 $str_crt = base64_decode($cert["crt"]);
                 $cert_details = openssl_x509_parse($str_crt);
@@ -138,10 +148,6 @@ class APISystemCertificateRead extends APIModel {
                     }
                 }
             }
-
-            if ($removeKey && isset($cert["prv"]))
-                unset($cert["prv"]);
-
         }
 
         return APIResponse\get(0, $data);

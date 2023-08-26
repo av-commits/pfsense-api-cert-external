@@ -639,6 +639,54 @@ function get($id, $data=[], $all=false) {
             "return" => $id,
             "message" => "Creation of active csr is not allowed, certificate is missing"
         ],
+        1096 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "CSR signing failed, verify CSR and altnames"
+        ],
+        1097 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "CSR and private key are not matching keypair"
+        ],
+        1098 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "Private key is invalid, check pem format"
+        ],
+        1099 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "CSR is invalid, check pem format"
+        ],
+        1100 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "Unable to parse pkcs12 data, verify password"
+        ],
+        1101 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "Pkcs12 data are missing"
+        ],
+        1102 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "Invalid import format"
+        ],
+        1103 => [
+            "status" => "bad request",
+            "code" => 400,
+            "return" => $id,
+            "message" => "Unable to read encrypted private key, verify password"
+        ],
 
         // 2000-2999 reserved for /api/v1/services API calls
         2000 => [

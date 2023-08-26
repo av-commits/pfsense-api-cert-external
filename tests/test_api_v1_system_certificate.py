@@ -5,7 +5,9 @@ import base64
 import pytz
 from datetime import datetime, timedelta
 from cryptography import x509
+from cryptography.hazmat._oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 # Constants
 CRT = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUR5VENDQXJHZ0F3SUJBZ0lVZUZacVZwcXlDNXRqa0I2TWNwdnIybGlHRDc0d0RRWU" \
@@ -168,6 +170,9 @@ class APIE2ETestSystemCertificate(e2e_test_framework.APIE2ETest):
         cert_ass_done["e2etest"] = False
         cert_ass_done["intcertrsa"] = False
         cert_ass_done["intcsrrsa"] = False
+        cert_ass_done["signprv"] = False
+        cert_ass_done["signnoprv"] = False
+
         for cert in self.last_response['data']:
             if cert["descr"].startswith('webConfigurator default'):
                 cert_ass_done["webcfg"] = True
@@ -257,22 +262,147 @@ class APIE2ETestSystemCertificate(e2e_test_framework.APIE2ETest):
             elif cert["descr"].startswith('INTERNAL_CSR_RSA'):
                 cert_ass_done["intcsrrsa"] = True
                 if cert["certtype"] != 'certificate-signing-request':
-                    raise AssertionError(f"expect 'certtype' in 'intcsrrsa' certificate: 'certificate-referenced-ca', current: '{cert['certtype']}'")
+                    raise AssertionError(f"expect 'certtype' in 'intcsrrsa' certificate: 'certificate-signing-request', current: '{cert['certtype']}'")
                 if not cert["csr"].startswith('LS0tLS1C'):
                     raise AssertionError(f"expect 'csr' in 'intcsrrsa' certificate: start with 'LS0tLS1C', current: '{cert['csr']}'")
                 if not cert["keyavailable"]:
                     raise AssertionError(f"expect 'keyavailable' in 'intcsrrsa' certificate: 'True', current: '{cert['keyavailable']}'")
                 if cert["subject"] != 'ST=Utah, OU=IT, O=Test Company, L=Salt Lake City, CN=internal-csr-e2e-test.example.com, C=US':
-                    raise AssertionError(f"expect 'subject' in 'intcsrrsa' certificate: 'ST=Utah, OU=IT, O=Test Company, L=Salt Lake City, CN=internal-csr-e2e-test.example.com, C=US' current: '{cert['caref']}'")
+                    raise AssertionError(f"expect 'subject' in 'intcsrrsa' certificate: 'ST=Utah, OU=IT, O=Test Company, L=Salt Lake City, CN=internal-csr-e2e-test.example.com, C=US' current: '{cert['subject']}'")
+            elif cert["descr"].startswith('SIGNING_CERT_RSA_NOPRV'):
+                cert_ass_done["signnoprv"] = True
+                if cert["certtype"] != 'certificate-referenced-ca':
+                    raise AssertionError(f"expect 'certtype' in 'signnoprv' certificate: 'certificate-referenced-ca', current: '{cert['certtype']}'")
+                if cert["keyavailable"]:
+                    raise AssertionError(f"expect 'keyavailable' in 'signnoprv' certificate: 'False', current: '{cert['keyavailable']}'")
+                if cert["subject"] != 'ST=California, O=My Company, L=San Francisco, CN=mysite.com, C=US':
+                    raise AssertionError(f"expect 'subject' in 'signnoprv' certificate: 'ST=California, O=My Company, L=San Francisco, CN=mysite.com, C=US' current: '{cert['subject']}'")
+            elif cert["descr"].startswith('SIGNING_CERT_RSA_PRV'):
+                cert_ass_done["signprv"] = True
+                if cert["certtype"] != 'certificate-referenced-ca':
+                    raise AssertionError(f"expect 'certtype' in 'signprv' certificate: 'certificate-referenced-ca', current: '{cert['certtype']}'")
+                if not cert["keyavailable"]:
+                    raise AssertionError(f"expect 'keyavailable' in 'signprv' certificate: 'True', current: '{cert['keyavailable']}'")
 
         for key in cert_ass_done:
             if not cert_ass_done[key]:
                 raise AssertionError(f"no certificate found for '{key}'")
 
 
+    def get_certificate_prv(self):
+        """Checks if get certificate return private key"""
+        cert_ass_done = {}
+        cert_ass_done["webcfg"] = False
+        cert_ass_done["e2etest"] = False
+        cert_ass_done["intcertrsa"] = False
+        cert_ass_done["signnoprv"] = False
 
-    get_tests = [{"name": "Read system certificates",
-        "post_test_callable":"get_certificate_assertions"}]
+        for cert in self.last_response['data']:
+            if cert["descr"].startswith('webConfigurator default'):
+                cert_ass_done["webcfg"] = True
+                if not cert['prv'].startswith('LS0tLS1C'):
+                    raise AssertionError(f"expect 'prv' in 'webcfg' certificate: starts with 'LS0tLS1C', current: '{cert['prv']}'")
+            elif cert["descr"].startswith('E2E Test'):
+                cert_ass_done["e2etest"] = True
+                if not cert['prv'].startswith('LS0tLS1C'):
+                    raise AssertionError(f"expect 'prv' in 'e2etest' certificate: starts with 'LS0tLS1C', current: '{cert['prv']}'")
+            elif cert["descr"].startswith('INTERNAL_CERT_RSA'):
+                cert_ass_done["intcertrsa"] = True
+                if not cert['prv'].startswith('LS0tLS1C'):
+                    raise AssertionError(f"expect 'prv' in 'intcertrsa' certificate: starts with 'LS0tLS1C', current: '{cert['prv']}'")
+            elif cert["descr"].startswith('SIGNING_CERT_RSA_NOPRV'):
+                cert_ass_done["signnoprv"] = True
+                if 'prv' in cert:
+                    raise AssertionError(f"expect 'prv' in 'signnoprv' certificate: not available, current: '{cert['prv']}'")
+
+        for key in cert_ass_done:
+            if not cert_ass_done[key]:
+                raise AssertionError(f"no certificate found for '{key}'")
+
+
+    def build_req_data_csr_for_signing_key(self):
+        prv_obj = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+
+        csr_obj = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
+            x509.NameAttribute(NameOID.COUNTRY_NAME, u"US"),
+            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"California"),
+            x509.NameAttribute(NameOID.LOCALITY_NAME, u"San Francisco"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"My Company"),
+            x509.NameAttribute(NameOID.COMMON_NAME, u"mysite.com"),
+        ])).sign(prv_obj, hashes.SHA256())
+
+        csr = base64.b64encode(csr_obj.public_bytes(serialization.Encoding.PEM)).decode()
+        prv = base64.b64encode(prv_obj.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption())).decode()
+
+        data = {'method': 'sign',
+                           'descr': 'SIGNING_CERT_RSA_PRV',
+                           'caref': self.caref,
+                           'keytype': 'RSA',
+                           'keylen': 2048,
+                           'digest_alg': 'sha256',
+                           'lifetime': 3650,
+                           'type': 'server',
+                           'csr': csr,
+                           'prv': prv,
+                           'altnames': [
+                               {'dns': 'est-altname.example.com'},
+                               {'ip': '1.1.1.1'},
+                               {'uri': 'http://example.com/example/uri'},
+                               {'email': 'example@example.com'}
+                           ]}
+        return data
+
+
+    def build_req_data_csr_for_signing(self):
+        data = self.build_req_data_csr_for_signing_key()
+        data['descr'] = 'SIGNING_CERT_RSA_NOPRV'
+        data.pop('prv')
+        return data
+
+
+    def build_req_data_csr_for_signing_check_csr_prv_match(self):
+        data = self.build_req_data_csr_for_signing_key()
+        data['prv'] = PRV
+        return data
+
+
+    def build_req_data_csr_for_signing_check_invalid_prv(self):
+        data = self.build_req_data_csr_for_signing_key()
+        data['prv'] = CRT
+        return data
+
+
+    def build_req_data_csr_for_signing_check_invalid_csr(self):
+        data = self.build_req_data_csr_for_signing_key()
+        data['csr'] = CRT
+        return data
+
+
+    get_tests = [
+        {
+            "name": "Read system certificates",
+            "post_test_callable":"get_certificate_assertions"
+        },
+        {
+            "name": "Disable API scrubbing sensitive data to get the private key",
+            "method": "PUT",
+            "uri": "/api/v1/system/api",
+            "req_data": {"scrubbing_sensitive_data": False}
+        },
+        {
+            "name": "Check if private key prv is present",
+            "post_test_callable":"get_certificate_prv"
+        },
+        {
+            "name": "Re-enable API scrubbing sensitive data to be secure again",
+            "method": "PUT",
+            "uri": "/api/v1/system/api",
+            "req_data": {"scrubbing_sensitive_data": True}
+        }
+    ]
     post_tests = [
         {
             "name": "Create RSA internal CA",
@@ -569,7 +699,106 @@ class APIE2ETestSystemCertificate(e2e_test_framework.APIE2ETest):
                 "dn_organizationalunit": "IT",
                 "type": "server",
             }
-        }
+        },
+        {
+            "name": "Sign CSR and store crt and prv",
+            "req_data_callable": "build_req_data_csr_for_signing_key"
+        },
+        {
+            "name": "Sign CSR and store crt",
+            "req_data_callable": "build_req_data_csr_for_signing"
+        },
+        {
+            "name": "Check validation of csr and prv match",
+            "status": 400,
+            "return": 1097,
+            "req_data_callable": "build_req_data_csr_for_signing_check_csr_prv_match"
+        },
+        {
+            "name": "Check validation of prv pem",
+            "status": 400,
+            "return": 1098,
+            "req_data_callable": "build_req_data_csr_for_signing_check_invalid_prv"
+        },
+        {
+            "name": "Check validation of csr pem",
+            "status": 400,
+            "return": 1099,
+            "req_data_callable": "build_req_data_csr_for_signing_check_invalid_csr"
+        },
+        {
+            "name": "Import existing pkcs12 file with key, cert and ca",
+            "req_data": {
+                "method": "existing",
+                "descr": "PCKS12 Import 1",
+                "format": "pkcs12",
+                "pkcs12": "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",
+                "import_cas": True,
+                "password": "password",
+            }
+        },
+        {
+            "name": "Check pkcs12 password validation",
+            "status": 400,
+            "return": 1100,
+            "req_data": {
+                "method": "existing",
+                "descr": "PCKS12 Import 1",
+                "format": "pkcs12",
+                "pkcs12": "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",
+                "import_cas": True,
+                "password": "password123",
+            }
+        },
+        {
+            "name": "Check pkcs12 data validation",
+            "status": 400,
+            "return": 1101,
+            "req_data": {
+                "method": "existing",
+                "descr": "PCKS12 Import 1",
+                "format": "pkcs12",
+                "import_cas": True,
+                "password": "password",
+            }
+        },
+        {
+            "name": "Check existing format validator",
+            "status": 400,
+            "return": 1102,
+            "req_data": {
+                "method": "existing",
+                "descr": "PCKS12 Import 1",
+                "format": "pkcs11",
+                "pkcs12": "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",
+                "import_cas": True,
+                "password": "password",
+            }
+        },
+        {
+            "name": "Import existing key pair with encrypted key",
+            "req_data": {
+                "method": "existing",
+                "descr": "Encrypted PEM Key Import 1",
+                "format": "pem_encrypted_key",
+                "crt": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURPVENDQWlHZ0F3SUJBZ0lVQm96eUtTZmErMDhkVnc4VThYVmZBYkFqWUVVd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0tqRUxNQWtHQTFVRUJoTUNWVk14R3pBWkJnTlZCQU1NRW0xNUlHbHVkR1Z5YldWa2FXRjBaU0JqWVRBZwpGdzB5TXpBNE1qWXhOekV6TXpkYUdBOHlNVEl6TURnd01qRTNNVE16TjFvd0h6RUxNQWtHQTFVRUJoTUNWVk14CkVEQU9CZ05WQkFNTUIyMTVJR05sY25Rd2dnRWlNQTBHQ1NxR1NJYjNEUUVCQVFVQUE0SUJEd0F3Z2dFS0FvSUIKQVFDcDJMeEYwQ1JsTkk4NnJmak9YNDNkOWhEdGtVdDFFQXZQblY1Q2JVZERiaG9ndjVBVERweHNhc3Jxb1R0OApYRlpheFB1K1dYcHRNUTVYSHZtRWtBYkw4aFEyVVNsOGxrSGYyRjRpTEM0LzY0MVIvMDlIL3V2eUJzMGdiUXdjCmNFMm5iWkl3VjZiQ3U4VlNXdStWU1RSa2ZoSk0xZnlKazN4Z1A2ZzFWU0U1MjlUS2ZKV1lSMVZiRmVkNGh3VXYKTnY0Q0Riem43ZEZNd0Y5dUxXS0Q1ZUtjR01sU3JIUEZhdlN4RlIwMjZQdmdoVGxzQ0h2bVdFcUZFRmJESzM5cwpSS21ESm5YMDR1enNxZ054NDlnaU1KQjkrWmZnK1VyRWZUS1BOSnFpcUI1bTdCMzBqa0xDb1l6VzJpWHVHcys1CmgrcmhUWUI2TThzUHZrdEIzWkRZNXArVkFnTUJBQUdqWURCZU1Bd0dBMVVkRXdFQi93UUNNQUF3RGdZRFZSMFAKQVFIL0JBUURBZ1dnTUIwR0ExVWREZ1FXQkJSOFdGc2FKNGRGSHg1U3FNZzdzWGdndEErU3ZqQWZCZ05WSFNNRQpHREFXZ0JUNU96WVNyUkFkSEh0clVWck9PMVpTOFc1Qk56QU5CZ2txaGtpRzl3MEJBUXNGQUFPQ0FRRUF0U2JICksydExIUThrRkt6YmVlaDNaUmxwMy9WcWM5UUZsckgzTkYvQVpiTnhDVUtDTWVFSEN5b2t5cXdhK3B2UjM3VlkKVitNaFYramlYeEdWVURRUUxkKzF2dGl1d2JTZVAxclFZbFdJeDREZlo0cHVkVEZ6MFZEQ1JaVThLYWRDbE9BQQpJU2plN3ZvUC9CZFRtWHkzVjR6MjUvV3B2WkZoOTNDOUNVcUloQ3ZLNnB4ZEtiZ2ZjcGdjWDJaUERqdkUwUmlMCjVFdURVdXJhTE0xbUdRUC9QODlVQURCZ0E5amFlRHN5MS83T2FNdWZTbGpKUkh6c0hvVlRORklxbVBlaWoxUmcKVlQ2dmhCbTJOV01BYXc1c09uWWtZWlE1V2RXbXdmVTRDRWt3ZHVYY3BoU3ZodFZHMHR1c0ViNVFRUytkTkllbApETGVlQ3pPT09sL0kvWmVLdlE9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg",
+                "prv": "LS0tLS1CRUdJTiBFTkNSWVBURUQgUFJJVkFURSBLRVktLS0tLQpNSUlGTFRCWEJna3Foa2lHOXcwQkJRMHdTakFwQmdrcWhraUc5dzBCQlF3d0hBUUl3bk1kQ3NzUkpMNENBZ2dBCk1Bd0dDQ3FHU0liM0RRSUpCUUF3SFFZSllJWklBV1VEQkFFcUJCQksrd1p3U3phYU9KRkI2RUhTYzAydkJJSUUKME5XdHdOU1RQemV6UTk0NDA2ZzRnWjVnL2xyZTJ3K0g5TnlmNEhTa2QyRlRhQVEyNFBCMGZNV2o0WVlubisyaAprYW5FdjRIMWppNTRSWFJLc3I0L0hCMnJsZXlOSlBIWXIvZURra2hmejFUTDVBT3BxSGQvTUhDRGx3Y2d6R05uCjJvOFlnK0w2cWM4WmpWWEt3Vi9kdFNsUm5JZDM2TnJhbjRqdXBNVjVZUVZJK1VTUjhTTytBMkRZeGxDa1Vob1cKdExtdXNFOEFndTJaSWlXTzVtd1dYVlR1aDVIT0RhTlAyQnprbWZvZFVaOW5BTU9pMm5LK0tiTG9UWGJhblZsWgpQSW1HNnZvVmZscDltZk1mSVk3TEpaaEhNYUlNRDZNaVlHa2VEL3RIR1puTk1TbzQzOW5TcnBJQmNtYmY4WktICkllK2pnR3FaZ2RVT0dwZlliQ3RHb0lBNmgraEliWkRKeVJnZFZyb1pLWDlhQzFSM1A5bFByMk0yOW9MQ0NSci8KRUlNNU03b3Z3N0lkMmdobWRWVnM0M2FCcHV4QVU0allSK0YxbUd1QXFNM3ZZM0xHTi9VVzJHcEpFMC8vSWg5eQpJZld5akRISE5PMXU0eU0xODFEUHg5ZkhhSGQ5Ymk4K0dRK005U3RrVzk3andaR3NPUlpHd1lleXBvQnhYSlJvCjk3ODhEczFwZWJ1TVA4NFYxU3F4a0hORkZiWTJGRU1vZVJZT2Z2OG4zMFliek5zNC9senRaM0w0QnFndmFGQ3oKUGtCMUdNNkNIVkVFZThSY25FaXRBZDMxMmhCNXZ5cDlpbytvWTc5L2E3djFETk9FT3JWTmdSQXdjcGNHQUpyTAo1WVJDZGI1TVdlSGI4SjVYM1gvSlpOV0dsTko5bW5vM3JWRWVSZjdpRmZXb3NzajJsR1FqNm5CZ3RDdTZQRGJvCnJUbForNkFIdzZMNXFOZ053UGhORmpNNUxNN3hjV1JDM2NsSEk2LzRJKzF2RzU1T1BzUFhoNGZ6eVRPRzBsS2MKNjV2OU1VQVNtNWNNVlFkd3MrVWxlOEQxcnR5MEZDa2FvaVVFVmsyKzE2R1hLM1ZVTnY4c0RXaDBHRTZlWldxNwpSVWZkZFNFcDA3TTRLc0FsQ2RRVU0vc1VhcXZyQkROeGl5T3oyTGhhcEZjM3dhNnN1ZUJDa1o1TVBZRVZuUUlMCjVWb0lsM3ovZGwvalZFczdOTmRoYlRSM05xblVQcnQwb2MrVU42by8vcXBGWFBhU0toVVEyREZwS1RZc0dCM20KVDU4TDZnN1FMWnYwYzU4QW8wblZ0MlJXM1BNaFd3UXRCd0NvWXlRVUFKVVdUYUNsV283bjBkUSthNWpPVDBxUAo5V0Y4bWppOHRUQllBSXNPQUNGN0RlVEI2blVQM3VFRG4xNUJhalZCYVpMaWFPNWQxYWJMMlVvVWJ6QVVxbWVWCmdxRmdURHBBbE5na1gzcXZwN0ErTjVtM0MyN0JEaURTdS9ONzNHVFNEb09mOC9LR2J0Q3ZOd1ZSKzlJMXNEL00KOGROOEgrRTBsY0E1OWNlcXhrQXdpUVBTdXMyVkZVRkwxTHU4aHp6L0ZnUW1WVS9HS0hTMlo5L2FSSFg0WWljVQpQMld3WTJ0YXJBM2R6RU9VU1dEdGRGL1NvalIxbkg1UW5CcFVTc3pnSmYycFhVcWtUQUY4OGdxSStUeFZweU11Ck5LaEQ0UWJZaHpXalArdDZGb09yVDczWEpoZUdDcjBSRVQ0UjdvcWZxejNudHl5T0JpZ0VpREp1bnRBeUZpQ0gKNlpDNWkwUE8yLytPekQwb3NjOWhJS3VnK25DYUVWc1pXUEdkM09iNkxTVmJsRC9DZm52V1YrVDdYV2NXTXhEMwpUbzJHR1M0T1llUW5mVVhlZWFwM3F2ditvWC9XWHpWMXFXMGJESk4vejZxclo5WEYvcC9VdEE4Sm4vekUySnozClFiVkZEandWczU2N3VkTUxXd1p5dmxnd2RuL1BuUTQ2V3F5VU1kQlI0S0xzclVoSDhQV1dBdUFoSFN3R3JySnUKYWR6RWZFNTlQc0JrLzZ4MDdpQmMxMTNqK29RYXJ0b1dLM0lMOWNuRHFKUEJUQkxxeVVEaUlySW9rTTJRaS9TWQpyaGk1akRaTFVDSCtXRXFoeFJ3T0t4NkUzZ01EenRVanptSG5GMUZkUlVrRgotLS0tLUVORCBFTkNSWVBURUQgUFJJVkFURSBLRVktLS0tLQo",
+                "password": "password",
+            }
+        },
+        {
+            "name": "Check wrong password for encrypted key",
+            "status": 400,
+            "return": 1103,
+            "req_data": {
+                "method": "existing",
+                "descr": "Encrypted PEM Key Import 2",
+                "format": "pem_encrypted_key",
+                "crt": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURPVENDQWlHZ0F3SUJBZ0lVQm96eUtTZmErMDhkVnc4VThYVmZBYkFqWUVVd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0tqRUxNQWtHQTFVRUJoTUNWVk14R3pBWkJnTlZCQU1NRW0xNUlHbHVkR1Z5YldWa2FXRjBaU0JqWVRBZwpGdzB5TXpBNE1qWXhOekV6TXpkYUdBOHlNVEl6TURnd01qRTNNVE16TjFvd0h6RUxNQWtHQTFVRUJoTUNWVk14CkVEQU9CZ05WQkFNTUIyMTVJR05sY25Rd2dnRWlNQTBHQ1NxR1NJYjNEUUVCQVFVQUE0SUJEd0F3Z2dFS0FvSUIKQVFDcDJMeEYwQ1JsTkk4NnJmak9YNDNkOWhEdGtVdDFFQXZQblY1Q2JVZERiaG9ndjVBVERweHNhc3Jxb1R0OApYRlpheFB1K1dYcHRNUTVYSHZtRWtBYkw4aFEyVVNsOGxrSGYyRjRpTEM0LzY0MVIvMDlIL3V2eUJzMGdiUXdjCmNFMm5iWkl3VjZiQ3U4VlNXdStWU1RSa2ZoSk0xZnlKazN4Z1A2ZzFWU0U1MjlUS2ZKV1lSMVZiRmVkNGh3VXYKTnY0Q0Riem43ZEZNd0Y5dUxXS0Q1ZUtjR01sU3JIUEZhdlN4RlIwMjZQdmdoVGxzQ0h2bVdFcUZFRmJESzM5cwpSS21ESm5YMDR1enNxZ054NDlnaU1KQjkrWmZnK1VyRWZUS1BOSnFpcUI1bTdCMzBqa0xDb1l6VzJpWHVHcys1CmgrcmhUWUI2TThzUHZrdEIzWkRZNXArVkFnTUJBQUdqWURCZU1Bd0dBMVVkRXdFQi93UUNNQUF3RGdZRFZSMFAKQVFIL0JBUURBZ1dnTUIwR0ExVWREZ1FXQkJSOFdGc2FKNGRGSHg1U3FNZzdzWGdndEErU3ZqQWZCZ05WSFNNRQpHREFXZ0JUNU96WVNyUkFkSEh0clVWck9PMVpTOFc1Qk56QU5CZ2txaGtpRzl3MEJBUXNGQUFPQ0FRRUF0U2JICksydExIUThrRkt6YmVlaDNaUmxwMy9WcWM5UUZsckgzTkYvQVpiTnhDVUtDTWVFSEN5b2t5cXdhK3B2UjM3VlkKVitNaFYramlYeEdWVURRUUxkKzF2dGl1d2JTZVAxclFZbFdJeDREZlo0cHVkVEZ6MFZEQ1JaVThLYWRDbE9BQQpJU2plN3ZvUC9CZFRtWHkzVjR6MjUvV3B2WkZoOTNDOUNVcUloQ3ZLNnB4ZEtiZ2ZjcGdjWDJaUERqdkUwUmlMCjVFdURVdXJhTE0xbUdRUC9QODlVQURCZ0E5amFlRHN5MS83T2FNdWZTbGpKUkh6c0hvVlRORklxbVBlaWoxUmcKVlQ2dmhCbTJOV01BYXc1c09uWWtZWlE1V2RXbXdmVTRDRWt3ZHVYY3BoU3ZodFZHMHR1c0ViNVFRUytkTkllbApETGVlQ3pPT09sL0kvWmVLdlE9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg",
+                "prv": "LS0tLS1CRUdJTiBFTkNSWVBURUQgUFJJVkFURSBLRVktLS0tLQpNSUlGTFRCWEJna3Foa2lHOXcwQkJRMHdTakFwQmdrcWhraUc5dzBCQlF3d0hBUUl3bk1kQ3NzUkpMNENBZ2dBCk1Bd0dDQ3FHU0liM0RRSUpCUUF3SFFZSllJWklBV1VEQkFFcUJCQksrd1p3U3phYU9KRkI2RUhTYzAydkJJSUUKME5XdHdOU1RQemV6UTk0NDA2ZzRnWjVnL2xyZTJ3K0g5TnlmNEhTa2QyRlRhQVEyNFBCMGZNV2o0WVlubisyaAprYW5FdjRIMWppNTRSWFJLc3I0L0hCMnJsZXlOSlBIWXIvZURra2hmejFUTDVBT3BxSGQvTUhDRGx3Y2d6R05uCjJvOFlnK0w2cWM4WmpWWEt3Vi9kdFNsUm5JZDM2TnJhbjRqdXBNVjVZUVZJK1VTUjhTTytBMkRZeGxDa1Vob1cKdExtdXNFOEFndTJaSWlXTzVtd1dYVlR1aDVIT0RhTlAyQnprbWZvZFVaOW5BTU9pMm5LK0tiTG9UWGJhblZsWgpQSW1HNnZvVmZscDltZk1mSVk3TEpaaEhNYUlNRDZNaVlHa2VEL3RIR1puTk1TbzQzOW5TcnBJQmNtYmY4WktICkllK2pnR3FaZ2RVT0dwZlliQ3RHb0lBNmgraEliWkRKeVJnZFZyb1pLWDlhQzFSM1A5bFByMk0yOW9MQ0NSci8KRUlNNU03b3Z3N0lkMmdobWRWVnM0M2FCcHV4QVU0allSK0YxbUd1QXFNM3ZZM0xHTi9VVzJHcEpFMC8vSWg5eQpJZld5akRISE5PMXU0eU0xODFEUHg5ZkhhSGQ5Ymk4K0dRK005U3RrVzk3andaR3NPUlpHd1lleXBvQnhYSlJvCjk3ODhEczFwZWJ1TVA4NFYxU3F4a0hORkZiWTJGRU1vZVJZT2Z2OG4zMFliek5zNC9senRaM0w0QnFndmFGQ3oKUGtCMUdNNkNIVkVFZThSY25FaXRBZDMxMmhCNXZ5cDlpbytvWTc5L2E3djFETk9FT3JWTmdSQXdjcGNHQUpyTAo1WVJDZGI1TVdlSGI4SjVYM1gvSlpOV0dsTko5bW5vM3JWRWVSZjdpRmZXb3NzajJsR1FqNm5CZ3RDdTZQRGJvCnJUbForNkFIdzZMNXFOZ053UGhORmpNNUxNN3hjV1JDM2NsSEk2LzRJKzF2RzU1T1BzUFhoNGZ6eVRPRzBsS2MKNjV2OU1VQVNtNWNNVlFkd3MrVWxlOEQxcnR5MEZDa2FvaVVFVmsyKzE2R1hLM1ZVTnY4c0RXaDBHRTZlWldxNwpSVWZkZFNFcDA3TTRLc0FsQ2RRVU0vc1VhcXZyQkROeGl5T3oyTGhhcEZjM3dhNnN1ZUJDa1o1TVBZRVZuUUlMCjVWb0lsM3ovZGwvalZFczdOTmRoYlRSM05xblVQcnQwb2MrVU42by8vcXBGWFBhU0toVVEyREZwS1RZc0dCM20KVDU4TDZnN1FMWnYwYzU4QW8wblZ0MlJXM1BNaFd3UXRCd0NvWXlRVUFKVVdUYUNsV283bjBkUSthNWpPVDBxUAo5V0Y4bWppOHRUQllBSXNPQUNGN0RlVEI2blVQM3VFRG4xNUJhalZCYVpMaWFPNWQxYWJMMlVvVWJ6QVVxbWVWCmdxRmdURHBBbE5na1gzcXZwN0ErTjVtM0MyN0JEaURTdS9ONzNHVFNEb09mOC9LR2J0Q3ZOd1ZSKzlJMXNEL00KOGROOEgrRTBsY0E1OWNlcXhrQXdpUVBTdXMyVkZVRkwxTHU4aHp6L0ZnUW1WVS9HS0hTMlo5L2FSSFg0WWljVQpQMld3WTJ0YXJBM2R6RU9VU1dEdGRGL1NvalIxbkg1UW5CcFVTc3pnSmYycFhVcWtUQUY4OGdxSStUeFZweU11Ck5LaEQ0UWJZaHpXalArdDZGb09yVDczWEpoZUdDcjBSRVQ0UjdvcWZxejNudHl5T0JpZ0VpREp1bnRBeUZpQ0gKNlpDNWkwUE8yLytPekQwb3NjOWhJS3VnK25DYUVWc1pXUEdkM09iNkxTVmJsRC9DZm52V1YrVDdYV2NXTXhEMwpUbzJHR1M0T1llUW5mVVhlZWFwM3F2ditvWC9XWHpWMXFXMGJESk4vejZxclo5WEYvcC9VdEE4Sm4vekUySnozClFiVkZEandWczU2N3VkTUxXd1p5dmxnd2RuL1BuUTQ2V3F5VU1kQlI0S0xzclVoSDhQV1dBdUFoSFN3R3JySnUKYWR6RWZFNTlQc0JrLzZ4MDdpQmMxMTNqK29RYXJ0b1dLM0lMOWNuRHFKUEJUQkxxeVVEaUlySW9rTTJRaS9TWQpyaGk1akRaTFVDSCtXRXFoeFJ3T0t4NkUzZ01EenRVanptSG5GMUZkUlVrRgotLS0tLUVORCBFTkNSWVBURUQgUFJJVkFURSBLRVktLS0tLQo",
+                "password": "pass123word",
+            }
+        },
     ]
     put_tests = [
         {
@@ -658,9 +887,35 @@ class APIE2ETestSystemCertificate(e2e_test_framework.APIE2ETest):
             "req_data": {"descr": "INTERNAL_CSR_RSA"}
         },
         {
+            "name": "Delete internal certificate",
+            "req_data": {"descr": "SIGNING_CERT_RSA_NOPRV"}
+        },
+        {
+            "name": "Delete internal certificate",
+            "req_data": {"descr": "SIGNING_CERT_RSA_PRV"}
+        },
+        {
+            "name": "Delete internal certificate: PCKS12 Import 1",
+            "req_data": {"descr": "PCKS12 Import 1"}
+        },
+        {
+            "name": "Delete internal certificate: Encrypted PEM Key Import 1",
+            "req_data": {"descr": "Encrypted PEM Key Import 1"}
+        },
+        {
             "name": "Delete CA certificate",
             "uri": "/api/v1/system/ca",
             "req_data": {"descr": "INTERNAL_CA_RSA"}
+        },
+        {
+            "name": "Delete CA certificate: my intermediate ca",
+            "uri": "/api/v1/system/ca",
+            "req_data": {"descr": "my intermediate ca"}
+        },
+        {
+            "name": "Delete CA certificate: my root ca",
+            "uri": "/api/v1/system/ca",
+            "req_data": {"descr": "my root ca"}
         },
         {
             "name": "Check deleting non-existing certificate ID",
@@ -692,6 +947,7 @@ class APIE2ETestSystemCertificate(e2e_test_framework.APIE2ETest):
         # Check our first POST response for the created CA's refid
         if len(self.post_responses) == 1:
             # Variables
+            self.caref = self.post_responses[0]["data"]["refid"]
             counter = 0
             # Loop through all tests and auto-add the caref ID to tests that do not have the no_caref key set
             for test in self.post_tests:

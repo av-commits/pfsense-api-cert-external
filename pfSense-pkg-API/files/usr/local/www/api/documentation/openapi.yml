@@ -12202,6 +12202,9 @@ paths:
                     API will only respond to read requests and modifications to configuration
                     will not be allowed.
                   type: boolean
+                scrubbing_sensitive_data:
+                  description: Enable or disable scrubbing of sensitive data like private keys.
+                  type: boolean
               type: object
       responses:
         "200":
@@ -12499,7 +12502,8 @@ paths:
                   default: false
                   description: Set this certificate as the active certificate used
                     by the webConfigurator. This parameter is only available when
-                    `type` is set to `server` or `method` is set to `existing`.
+                    `type` is set to `server`, a valid prv is present and a valid crt
+                    is present.
                   type: boolean
                 altnames:
                   description: Subject alternative names to list in this certificate.
@@ -12507,7 +12511,8 @@ paths:
                     alt name type as the key and the alt name value as the value.
                     Supported alt name types are `dns` for FQDNs, `ip` for IP addresses,
                     `uri` for URLs, and `email` for email addresses. This parameter
-                    is only available when `method` is set to `internal` or `external`.
+                    is only available when `method` is set to `internal`, `external`
+                    or `sign`.
                   items:
                     type: object
                   type: array
@@ -12519,7 +12524,7 @@ paths:
                 caref:
                   description: Unique reference ID of the existing certificate signing
                     authority to use for the certificate. This parameter is required
-                    when `method` is set to `internal`.
+                    when `method` is set to `internal` or `sign`.
                   type: string
                 crt:
                   description: 'Base64 encoded PEM certificate to import. This parameter
@@ -12527,14 +12532,18 @@ paths:
                     releases referred to the `crt` parameter as `cert`. Both `crt`
                     and `cert` can be used interchangeably._'
                   type: string
+                csr:
+                  description: 'Base64 encoded PEM certificate signing request (CSR) to 
+                    sign. This parameter is required when `method` is set to `sign`.'
+                  type: string
                 descr:
                   description: Descriptive name for the certificate.
                   type: string
                 digest_alg:
                   description: 'Digest algorithm to use. This parameter is required
-                    when `method` is set to `internal` or `external`. _Note: options are subject
-                    to change, when in doubt, check the pfSense webConfigurator options
-                    for this field._'
+                    when `method` is set to `internal`, `external` or `sign`. _Note: 
+                    options are subject to change, when in doubt, check the pfSense 
+                    webConfigurator options for this field._'
                   enum:
                     - sha1
                     - sha224
@@ -12580,6 +12589,25 @@ paths:
                     when in doubt, check the pfSense webConfigurator options for this 
                     parameter._'
                   type: string
+                format:
+                  description: 'Format of certificate and key to be imported. If no 
+                    format value is set the value `pem` is used. The format `pem` 
+                    requires a valid certificate `crt` and unencrypted key `prv`.
+                    The format `pem_encrypted_key` requires a valid certificate `crt`, 
+                    encrypted key `prv` and the encryption `password`. The format 
+                    `pkcs12` requires a base64 encode key store in field `pkcs12`, 
+                    the corresponding `password` and flag if certificate chain 
+                    should be imported `import_cas`.'
+                  enum:
+                    - pem
+                    - pem_encrypted_key
+                    - pkcs12
+                  type: string
+                import_cas:
+                  description: 'Import all CAs that are part of the key store. The
+                    parameter is allowed when `method` is set to `existing` and 
+                    the parameter `format` is set to `pkcs12`'
+                  type: boolean
                 keylen:
                   description: Specify the private key length to generate. This parameter
                     is required when `method` is set to `internal` or `external` AND 
@@ -12608,30 +12636,46 @@ paths:
                   description: 'Number of days you would like this certificate to
                     be valid for. This must be below OpenSSL''s maximum lifetime value
                     (around `12000` days). This parameter is required when `method`
-                    is set  to `internal`. _Note: maximum value is subject to change,
-                    when in doubt,  check the pfSense webConfigurator options for
-                    this parameter._'
+                    is set to `internal` or `sign`. _Note: maximum value is subject 
+                    to change, when in doubt, check the pfSense webConfigurator 
+                    options for this parameter._'
                   type: integer
                 method:
                   description: 'Method used to add the certificate. The method 
                     `external` is used to create local key and a certificate signing
-                    request _Note: previous releases referred to the `existing` method
-                    as `import`. You may use `existing` or `import` interchangeably._'
+                    request. The method `sign` is used to sign an existing external 
+                    certificate signing request and generate the certificate with a
+                    local CA. _Note: previous releases referred to the `existing` 
+                    method as `import`. You may use `existing` or `import` 
+                    interchangeably._'
                   enum:
                     - import
                     - existing
                     - internal
                     - external
+                    - sign
+                  type: string
+                password:
+                  description: 'Key store password. The parameter is required when 
+                    `method` is set to `existing` and the parameter `format` is set 
+                    to `pkcs12` or `pem_encrypted_key`'
+                  type: string
+                pkcs12:
+                  description: 'Corresponding Base64 encoded pkcs12 key store. The
+                    parameter is required when `method` is set to `existing` and 
+                    the parameter `format` is set to `pkcs12`'
                   type: string
                 prv:
                   description: 'Corresponding Base64 encoded certificate key. This
-                    parameter is required when `method` is set to `existing`. _Note:
-                    previous releases referred to the `prv` parameter as `key`. Both
-                    `prv` and `key` can be used interchangeably._'
+                    parameter is required when `method` is set to `existing` and 
+                    optional when `method` is set to `sign`. _Note: previous releases 
+                    referred to the `prv` parameter as `key`. Both `prv` and `key` 
+                    can be used interchangeably._'
                   type: string
                 type:
                   description: Type of certificate to generate. This parameter is
-                    required when `method` is set to `internal` or `external`.
+                    required when `method` is set to `internal`, `external` or
+                    `sign`.
                   enum:
                     - server
                     - user

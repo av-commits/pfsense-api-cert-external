@@ -26,8 +26,6 @@ class APISystemCertificateUpdate extends APIModel {
     }
 
     public function action() {
-        $removeKey = true;
-
         # Update certificate
         $this->set_config("cert/{$this->id}", $this->validated_data);
 
@@ -47,8 +45,6 @@ class APISystemCertificateUpdate extends APIModel {
         }
 
         $res = $this->get_config("cert/{$this->id}");
-        if ($removeKey && isset($res["prv"]))
-            unset($res["prv"]);
 
         return APIResponse\get(0, $res);
     }

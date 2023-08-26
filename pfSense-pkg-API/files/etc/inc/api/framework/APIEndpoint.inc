@@ -77,6 +77,18 @@ class APIEndpoint {
             $resp = APIResponse\get(2);
         }
 
+        # scrubbing sensitive data like prv or key (private keys) if enabled
+        if (isset($pkg_config["scrubbing_sensitive_data"])) {
+            if (is_array($resp['data'])) {
+                foreach ($resp['data'] as &$item) {
+                    if (isset($item['prv'])) unset($item['prv']);
+                    if (isset($item['key'])) unset($item['key']);
+                }
+            }
+            if (isset($resp['data']['prv'])) unset($resp['data']['prv']);
+            if (isset($resp['data']['key'])) unset($resp['data']['key']);
+        }
+
         # Add custom response headers if configured
         if (!empty($pkg_config["custom_headers"])) {
             foreach ($pkg_config["custom_headers"] as $name=>$value) {

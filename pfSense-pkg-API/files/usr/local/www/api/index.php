@@ -108,6 +108,13 @@ if (isset($_POST["save"])) {
         unset($pkg_config["readonly"]);
     }
 
+    # Save our scrubbing_sensitive_data value
+    if (isset($_POST["scrubbing_sensitive_data"])) {
+        $pkg_config["scrubbing_sensitive_data"] = "";
+    } else {
+        unset($pkg_config["scrubbing_sensitive_data"]);
+    }
+
     # Save our allow OPTIONS value
     if (isset($_POST["allow_options"])) {
         $pkg_config["allow_options"] = "";
@@ -416,6 +423,14 @@ $advanced_section->addInput(new Form_Textarea(
     separated by a space. If a client tries to invoke an API call that is not within an allowed subnet, a 403 error will
     be returned. If left blank, all IPs will be allowed and the access list will essentially be bypassed.'
 );
+$advanced_section->addInput(new Form_Checkbox(
+    'scrubbing_sensitive_data',
+    'Scrubbing sensitive data',
+    'Enable scrubbing of sensitive data like private keys',
+    isset($pkg_config["scrubbing_sensitive_data"]),
+    ''
+))->setHelp("Remove sensitive data like private keys from api response to prevent distribution them");
+
 
 # Populate the entire form
 $form->add($general_section);

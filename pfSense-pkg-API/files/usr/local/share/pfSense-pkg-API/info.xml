@@ -21,6 +21,7 @@
 				<keybytes>16</keybytes>
 				<keys></keys>
                 <enable_login_protection></enable_login_protection>
+                <scrubbing_sensitive_data></scrubbing_sensitive_data>
         </conf>
     </package>
 </pfsensepkgs>

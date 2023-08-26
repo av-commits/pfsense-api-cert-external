@@ -78,6 +78,15 @@ class APISystemAPIUpdate extends APIModel {
         }
     }
 
+    private function __validate_scrubbing_sensitive_data() {
+        # Check for our optional 'scrubbing_sensitive_data' payload value
+        if ($this->initial_data['scrubbing_sensitive_data'] === true) {
+            $this->validated_data["scrubbing_sensitive_data"] = "";
+        } elseif ($this->initial_data['scrubbing_sensitive_data'] === false) {
+            unset($this->validated_data["scrubbing_sensitive_data"]);
+        }
+    }
+
     private function __validate_log_successful_auth() {
         # Check for our optional 'log_successful_auth' payload value
         if ($this->initial_data['log_successful_auth'] === true) {
@@ -296,6 +305,7 @@ class APISystemAPIUpdate extends APIModel {
         $this->__validate_custom_headers();
         $this->__validate_access_list();
         $this->__validate_enable_login_protection();
+        $this->__validate_scrubbing_sensitive_data();
         $this->__validate_log_successful_auth();
         $this->__validate_hasync();
         $this->__validate_hasync_hosts();

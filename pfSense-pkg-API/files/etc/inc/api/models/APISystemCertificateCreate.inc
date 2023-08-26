@@ -21,6 +21,7 @@ class APISystemCertificateCreate extends APIModel {
     public $cert_method;
     public $cert_attr;
     public $dn;
+    public $import;
 
     # Create our method constructor
     public function __construct() {
@@ -30,18 +31,32 @@ class APISystemCertificateCreate extends APIModel {
         $this->cert_method = null;
         $this->cert_attr = [];
         $this->dn = [];
+        $this->import = [];
     }
 
     public function action() {
-        $removeKey = true;
-
         # Add the new certificate
         $this->id = $this->get_next_id("cert");
-        $this->set_config("cert/{$this->id}",  $this->validated_data);
+        $this->set_config("cert/{$this->id}", $this->validated_data);
+
+        # Import and update CAs if required
+        foreach ($this->import['cas'] as $ca) {
+            $ca_data = openssl_x509_parse($ca);
+            if (!$ca_data) continue;
+            $cn = $ca_data['subject']['CN'];
+            $int_ca = array('descr' => $cn, 'refid' => uniqid());
+            if (ca_import($int_ca, $ca)) {
+                $ca_id = $this->get_next_id("ca");
+                $this->set_config("ca/{$ca_id}", $int_ca);
+            }
+        }
 
         # If user requests this cert to be active, configure it as the wc cert
         $restart_webcfg = false;
-        if ($this->initial_data["active"] === true and $this->validated_data["type"] === "server") {
+        if ($this->initial_data["active"] === true and
+                $this->validated_data["type"] === "server" and
+                !empty($this->validated_data["prv"]) and
+                !empty($this->validated_data["crt"])) {
             $this->set_config("system/webgui/ssl-certref", $this->validated_data["refid"]);
             $restart_webcfg = true;
         }
@@ -54,9 +69,6 @@ class APISystemCertificateCreate extends APIModel {
             APITools\restart_webconfigurator();
         }
 
-        if ($removeKey && isset($this->validated_data["prv"]))
-            unset($this->validated_data["prv"]);
-
         return APIResponse\get(0, $this->validated_data);
     }
 
@@ -68,13 +80,24 @@ class APISystemCertificateCreate extends APIModel {
 
         # Validate 'existing' method fields
         if ($this->cert_method === "existing") {
-            $this->__validate_crt();
-            $this->__validate_prv();
+            $this->__validate_format();
+            if ($this->import['format'] === "pem") {
+                $this->__validate_crt();
+                $this->__validate_prv();
+            } else if ($this->import['format'] === "pem_encrypted_key") {
+                $this->__validate_crt();
+                $this->__validate_password();
+                $this->__validate_prv_enc();
+            } else if ($this->import['format'] === "pkcs12") {
+                $this->__validate_password();
+                $this->__validate_import_cas();
+                $this->__validate_pkcs12();
+            }
             $this->validated_data["type"] = "server";
         }
 
         # Validate 'internal' method fields
-        if ($this->cert_method === "internal") {
+        elseif ($this->cert_method === "internal") {
             $this->__validate_caref();
             $this->__validate_keytype();
             $this->__validate_keylen();
@@ -92,7 +115,7 @@ class APISystemCertificateCreate extends APIModel {
         }
 
         # Validate 'external' method fields (create a csr)
-        if ($this->cert_method === "external") {
+        elseif ($this->cert_method === "external") {
             $this->__validate_keytype();
             $this->__validate_keylen();
             $this->__validate_ecname();
@@ -107,6 +130,16 @@ class APISystemCertificateCreate extends APIModel {
             $this->__validate_altnames();
             $this->__validate_dont_allow_active();
         }
+        # Validate 'sign' method fields (sign external csr)
+        elseif ($this->cert_method === "sign") {
+            $this->__validate_caref();
+            $this->__validate_csr();
+            $this->__validate_sign_prv();
+            $this->__validate_lifetime();
+            $this->__validate_digest_alg();
+            $this->__validate_type();
+            $this->__validate_altnames();
+        }
 
         # Create the certificate
         $this->create_certificate();
@@ -114,7 +147,7 @@ class APISystemCertificateCreate extends APIModel {
 
     private function __validate_method() {
         # Local variables
-        $methods = ["import", "existing", "internal", "external"];
+        $methods = ["import", "existing", "internal", "external", "sign"];
 
         if (isset($this->initial_data['method'])) {
             # Ensure the method is a supported one
@@ -130,6 +163,22 @@ class APISystemCertificateCreate extends APIModel {
             }
         } else {
             $this->errors[] = APIResponse\get(1031);
+        }
+    }
+
+    private function __validate_format() {
+        # supported formats, first is default
+        $formats = ["pem", "pem_encrypted_key", "pkcs12"];
+
+        if (isset($this->initial_data['format'])) {
+            # Ensure the format is a supported one
+            if (in_array($this->initial_data["format"], $formats)) {
+                $this->import['format'] = $this->initial_data["format"];
+            } else {
+                $this->errors[] = APIResponse\get(1102);
+            }
+        } else {
+            $this->import['format'] = $formats[0];
         }
     }
 
@@ -171,13 +220,13 @@ class APISystemCertificateCreate extends APIModel {
     }
 
     private function __validate_prv() {
-        # Check for our optional 'prv' field
-        if (isset($this->initial_data["prv"]) or isset($this->initial_data["key"])) {
-            # Convert 'key' to 'prv' to remain backwards compatible
-            if (isset($this->initial_data["key"])) {
-                $this->initial_data["prv"] = $this->initial_data["key"];
-            }
+        # Convert 'key' to 'prv' to remain backwards compatible
+        if (isset($this->initial_data["key"])) {
+            $this->initial_data["prv"] = $this->initial_data["key"];
+        }
 
+        # Check for our optional 'prv' field
+        if (isset($this->initial_data["prv"])) {
             # Decode certificate from base64 format
             $crt = base64_decode($this->initial_data["crt"]);
             $key = base64_decode($this->initial_data["prv"]);
@@ -195,6 +244,67 @@ class APISystemCertificateCreate extends APIModel {
             }
         } else {
             $this->errors[] = APIResponse\get(1004);
+        }
+    }
+
+    private function __validate_prv_enc() {
+        # Check for our optional 'prv' field
+        if (isset($this->initial_data["prv"])) {
+            # Decode certificate from base64 format
+            $crt = base64_decode($this->initial_data["crt"]);
+            $key_enc = base64_decode($this->initial_data["prv"]);
+
+            $key_n = openssl_pkey_get_private($key_enc, $this->import['password']);
+            if ($key_n) {
+                $key = '';
+                openssl_pkey_export($key_n, $key);
+
+                if (cert_get_publickey($crt, false) != cert_get_publickey($key, false, 'prv')) {
+                    $this->errors[] = APIResponse\get(1049);
+                }
+                else {
+                    $this->validated_data["prv"] = $key;
+                }
+            } else {
+                $this->errors[] = APIResponse\get(1103);
+            }
+        } else {
+            $this->errors[] = APIResponse\get(1004);
+        }
+    }
+
+    private function __validate_import_cas() {
+        if (isset($this->initial_data["import_cas"])
+                && $this->initial_data["import_cas"]) {
+            $this->import['add_cas'] = true;
+        } else {
+            $this->import['add_cas'] = false;
+        }
+    }
+
+    private function __validate_password() {
+        if (isset($this->initial_data["password"])) {
+            $this->import['password'] = $this->initial_data["password"];
+        } else {
+            $this->import['password'] = "";
+        }
+    }
+
+    private function __validate_pkcs12() {
+        if (isset($this->initial_data["pkcs12"])) {
+            $pkcs12_data = array();
+            if (openssl_pkcs12_read(base64_decode($this->initial_data["pkcs12"]),
+                    $pkcs12_data, $this->import['password'])) {
+                $this->validated_data["crt"] = $pkcs12_data['cert'];
+                $this->validated_data["prv"] = $pkcs12_data['pkey'];
+                if ($this->import['add_cas'] && is_array($pkcs12_data['extracerts'])) {
+                    $this->import['cas'] = $pkcs12_data['extracerts'];
+                }
+            } else {
+                $this->errors[] = APIResponse\get(1100);
+            }
+        } else {
+            $this->errors[] = APIResponse\get(1101);
         }
     }
 
@@ -427,6 +537,41 @@ class APISystemCertificateCreate extends APIModel {
         }
     }
 
+    private function __validate_csr() {
+        $csr = base64_decode($this->initial_data["csr"]);
+        if (strstr($csr, "BEGIN CERTIFICATE REQUEST") &&
+                strstr($csr, "END CERTIFICATE REQUEST") ||
+                strstr($csr, "BEGIN NEW CERTIFICATE REQUEST") &&
+                strstr($csr, "END NEW CERTIFICATE REQUEST")) {
+            $this->cert_attr["csr"] = $csr;
+        } else {
+            #This signing request does not appear to be valid
+            $this->errors[] = APIResponse\get(1099);
+        }
+    }
+
+    private function __validate_sign_prv() {
+        if ( ! empty($this->initial_data["prv"])) {
+            $prv = base64_decode($this->initial_data["prv"]);
+            if (strstr($prv, "BEGIN PRIVATE KEY") &&
+                    strstr($prv, "END PRIVATE KEY") ||
+                    strstr($prv, "BEGIN RSA PRIVATE KEY") &&
+                    strstr($prv, "END RSA PRIVATE KEY") ||
+                    strstr($prv, "BEGIN EC PRIVATE KEY") &&
+                    strstr($prv, "END EC PRIVATE KEY")) {
+
+                if (cert_get_publickey($this->cert_attr["csr"], false, 'csr') != cert_get_publickey($prv, false, 'prv')) {
+                    $this->errors[] = APIResponse\get(1097);
+                } else {
+                    $this->validated_data["prv"] = $this->initial_data["prv"];
+                }
+            } else {
+                #This private does not appear to be valid.
+                $this->errors[] = APIResponse\get(1098);
+            }
+        }
+    }
+
     public function get_all_ca() {
         # Local variables
         $ca_enties = [];
@@ -485,6 +630,25 @@ class APISystemCertificateCreate extends APIModel {
             if (!$openssl_csr) {
                 $this->errors[] = APIResponse\get(1094);
             }
+        }
+
+        # Only generate a new certificate if no errors were found and the method was sign
+        if (empty($this->errors) and $this->cert_method === "sign") {
+            $ca = & lookup_ca($this->validated_data["caref"]);
+
+            $n509 = csr_sign(
+                $this->cert_attr["csr"],
+                $ca,
+                $this->cert_attr['lifetime'],
+                $this->validated_data["type"],
+                $this->dn["subjectAltName"],
+                $this->cert_attr['digest_alg']);
+            if ($n509) {
+                $this->validated_data['crt'] = base64_encode($n509);
+            } else {
+                $this->errors[] = APIResponse\get(1096);
+            }
+            unset($n509);
         }
     }
 }
